@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 
+// tipoReporte se calcula dinámicamente: si tiene nombre → "Conocido", si no → "Sin Identificar"
+function computeTipoReporte(nombreCompleto: string | null): string {
+  return nombreCompleto ? 'Conocido' : 'Sin Identificar';
+}
+
+// Agrega tipoReporte calculado a cada reporte
+function enrichReporte(r: Record<string, unknown>) {
+  return { ...r, tipoReporte: computeTipoReporte(r.nombreCompleto as string | null) };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -48,7 +58,6 @@ export async function POST(request: NextRequest) {
     const reporte = await db.reporteEmergencia.create({
       data: {
         id,
-        tipoReporte: tipo_reporte,
         nombreCompleto: tipo_reporte === 'Conocido' ? nombre_completo : null,
         descripcionFisica: tipo_reporte === 'Sin Identificar' ? descripcion_fisica : null,
         ubicacionExacta: ubicacion_exacta,
@@ -58,10 +67,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const enriched = enrichReporte(reporte as unknown as Record<string, unknown>);
+
     triggerAiAnalysis(reporte.id, {
       tipo_reporte,
-      nombre_completo,
-      descripcion_fisica,
+      nombre_completo: tipo_reporte === 'Conocido' ? nombre_completo : undefined,
+      descripcion_fisica: tipo_reporte === 'Sin Identificar' ? descripcion_fisica : undefined,
       ubicacion_exacta,
       estado,
       contacto,
@@ -70,7 +81,7 @@ export async function POST(request: NextRequest) {
       console.error('[AI Analysis] Background error:', err.message);
     });
 
-    return NextResponse.json({ success: true, reporte }, { status: 201 });
+    return NextResponse.json({ success: true, reporte: enriched }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -98,20 +109,25 @@ export async function GET(request: NextRequest) {
       take: 200,
     });
 
-    // Compute metrics
+    // Enriquecer cada reporte con tipoReporte calculado
+    const enriched = reportes.map((r) =>
+      enrichReporte(r as unknown as Record<string, unknown>)
+    );
+
+    // Calcular métricas
     const metrics = {
-      total: reportes.length,
-      conocidos: reportes.filter((r) => r.tipoReporte === 'Conocido').length,
-      sinIdentificar: reportes.filter((r) => r.tipoReporte === 'Sin Identificar').length,
-      aSalvo: reportes.filter((r) => r.estado === 'A salvo').length,
-      heridos: reportes.filter((r) => r.estado === 'Herido').length,
-      desaparecidos: reportes.filter((r) => r.estado === 'Desaparecido').length,
-      enTransito: reportes.filter((r) => r.estado === 'En tránsito').length,
-      conIa: reportes.filter((r) => r.urgenciaAi !== null).length,
-      pendienteIa: reportes.filter((r) => r.urgenciaAi === null).length,
+      total: enriched.length,
+      conocidos: enriched.filter((r) => r.tipoReporte === 'Conocido').length,
+      sinIdentificar: enriched.filter((r) => r.tipoReporte === 'Sin Identificar').length,
+      aSalvo: enriched.filter((r) => r.estado === 'A salvo').length,
+      heridos: enriched.filter((r) => r.estado === 'Herido').length,
+      desaparecidos: enriched.filter((r) => r.estado === 'Desaparecido').length,
+      enTransito: enriched.filter((r) => r.estado === 'En tránsito').length,
+      conIa: enriched.filter((r) => r.urgenciaAi !== null).length,
+      pendienteIa: enriched.filter((r) => r.urgenciaAi === null).length,
     };
 
-    return NextResponse.json({ success: true, reportes, metrics });
+    return NextResponse.json({ success: true, reportes: enriched, metrics });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return NextResponse.json({ error: message }, { status: 500 });
