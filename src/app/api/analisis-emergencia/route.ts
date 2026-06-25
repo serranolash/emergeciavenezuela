@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import ZAI from 'z-ai-web-dev-sdk';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,9 +17,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Reporte no encontrado' }, { status: 404 });
     }
 
-    const zai = await ZAI.create();
+    // Importación dinámica — graciosa en Vercel
+    let ZAI: unknown;
+    try {
+      ZAI = (await import('z-ai-web-dev-sdk')).default;
+    } catch {
+      return NextResponse.json({
+        success: false,
+        message: 'Análisis de IA no disponible en este entorno de despliegue. Funciona en el entorno de desarrollo local.',
+      });
+    }
 
-    const lines: string[] = [`Tipo: ${reporte.tipoReporte}`];
+    const zai = await (ZAI as { create: () => Promise<unknown> }).create();
+
+    const tipo = reporte.nombreCompleto ? 'Conocido' : 'Sin Identificar';
+    const lines: string[] = [`Tipo: ${tipo}`];
     if (reporte.nombreCompleto) lines.push(`Nombre: ${reporte.nombreCompleto}`);
     if (reporte.descripcionFisica) lines.push(`Descripción física: ${reporte.descripcionFisica}`);
     lines.push(`Ubicación: ${reporte.ubicacionExacta}`);
@@ -28,7 +39,7 @@ export async function POST(request: NextRequest) {
     lines.push(`Contacto: ${reporte.contacto}`);
     if (reporte.notaAdicional) lines.push(`Nota adicional: ${reporte.notaAdicional}`);
 
-    const completion = await zai.chat.completions.create({
+    const completion = await (zai as { chat: { completions: { create: (opts: unknown) => Promise<{ choices: Array<{ message: { content: string } }> }> } } }).chat.completions.create({
       messages: [
         {
           role: 'assistant',
@@ -58,7 +69,12 @@ export async function POST(request: NextRequest) {
       data: { urgenciaAi: urgencia, prioridadDesc },
     });
 
-    return NextResponse.json({ success: true, reporte: updated });
+    const enriched = {
+      ...(updated as unknown as Record<string, unknown>),
+      tipoReporte: tipo,
+    };
+
+    return NextResponse.json({ success: true, reporte: enriched });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return NextResponse.json({ error: message }, { status: 500 });

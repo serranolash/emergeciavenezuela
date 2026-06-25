@@ -25,6 +25,8 @@ import {
   HelpCircle,
   Truck,
   TrendingUp,
+  RefreshCw,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,6 +140,14 @@ export default function EmergenciaPage() {
     nota_adicional: "",
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Update status state
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateId, setUpdateId] = useState("");
+  const [updateNombre, setUpdateNombre] = useState("");
+  const [updateEstado, setUpdateEstado] = useState<EstadoType | "">("");
+  const [updateNota, setUpdateNota] = useState("");
+  const [updating, setUpdating] = useState(false);
 
   // ── Fetch ──
   const fetchReportes = useCallback(async () => {
@@ -260,6 +270,36 @@ export default function EmergenciaPage() {
     setDialogMode(mode);
     setFormErrors({});
     setDialogOpen(true);
+  }
+
+  // ── Update Status ──
+  function openUpdateDialog(reporte: Reporte) {
+    setUpdateId(reporte.id);
+    setUpdateNombre(reporte.nombreCompleto || "Persona sin identificar");
+    setUpdateEstado(reporte.estado as EstadoType);
+    setUpdateNota("");
+    setUpdateOpen(true);
+  }
+
+  async function handleUpdateEstado() {
+    if (!updateEstado) return;
+    setUpdating(true);
+    try {
+      const res = await fetch("/api/reportes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: updateId, estado: updateEstado, nota_actualizacion: updateNota.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al actualizar");
+      toast({ title: "Estado actualizado", description: `${updateNombre} → ${updateEstado}` });
+      setUpdateOpen(false);
+      fetchReportes();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Error desconocido", variant: "destructive" });
+    } finally {
+      setUpdating(false);
+    }
   }
 
   // ── Tab config ──
@@ -500,8 +540,18 @@ export default function EmergenciaPage() {
                                 {r.notaAdicional && (
                                   <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2 mb-2 border border-gray-100">{r.notaAdicional}</p>
                                 )}
-                                <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                                  <Clock className="size-3" />{formatRelativeTime(r.fechaRegistro)}
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                                    <Clock className="size-3" />{formatRelativeTime(r.fechaRegistro)}
+                                  </div>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openUpdateDialog(r); }}
+                                    className="flex items-center gap-1.5 text-xs font-medium text-[#e86100] hover:text-[#d45700] hover:bg-[#e86100]/10 rounded-lg px-2.5 py-1.5 transition-all active:scale-95"
+                                    title="Actualizar estado"
+                                  >
+                                    <RefreshCw className="size-3.5" />
+                                    <span className="hidden sm:inline">Actualizar estado</span>
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -689,6 +739,51 @@ export default function EmergenciaPage() {
             <Button type="submit" disabled={submitting} className="w-full bg-[#e86100] hover:bg-[#d45700] text-white font-bold text-base py-6 rounded-xl shadow-lg shadow-[#e86100]/25 transition-all active:scale-[0.98] disabled:opacity-50">
               {submitting ? <><Loader2 className="size-5 animate-spin mr-2" />Enviando...</> : <><Send className="size-5 mr-2" />{dialogMode === "conocido" ? "Enviar Reporte" : "Reportar como Sin Identificar"}</>}
             </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Dialog: Update Status ─── */}
+      <Dialog open={updateOpen} onOpenChange={setUpdateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-[#1a1a1a]">
+              <div className="bg-[#e86100] rounded-lg p-1.5"><CheckCircle2 className="size-4 text-white" /></div>
+              Actualizar Estado
+            </DialogTitle>
+            <DialogDescription>
+              Cambia el estado de <span className="font-semibold text-foreground">{updateNombre}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); handleUpdateEstado(); }} className="space-y-4 mt-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-[#1a1a1a]"><Activity className="size-4 inline mr-1.5 text-[#e86100]" />Nuevo estado *</Label>
+              <Select value={updateEstado} onValueChange={(val) => setUpdateEstado(val as EstadoType)}>
+                <SelectTrigger className="w-full py-5 text-base rounded-xl border-[#d4d4d4]"><SelectValue placeholder="Seleccionar estado..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="A salvo"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-emergency-safe" />A salvo — Fue encontrado/a a salvo</span></SelectItem>
+                  <SelectItem value="Herido"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-emergency-injured" />Herido — Requiere atención médica</span></SelectItem>
+                  <SelectItem value="Desaparecido"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-[#e86100]" />Desaparecido — Sigue sin localizarse</span></SelectItem>
+                  <SelectItem value="En tránsito"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-urgency-2" />En tránsito — Siendo trasladado/a</span></SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-[#1a1a1a]"><FileText className="size-4 inline mr-1.5 text-[#e86100]" />Nota de actualización (opcional)</Label>
+              <Textarea
+                value={updateNota}
+                onChange={(e) => setUpdateNota(e.target.value)}
+                placeholder="Ej: Fue encontrado en el refugio de Plaza Bolívar. Está bien de salud."
+                className="py-4 text-base rounded-xl border-[#d4d4d4] focus:border-[#e86100] min-h-[80px]"
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" onClick={() => setUpdateOpen(false)} className="flex-1 rounded-xl py-5">Cancelar</Button>
+              <Button type="submit" disabled={updating || !updateEstado} className="flex-1 bg-[#e86100] hover:bg-[#d45700] text-white font-bold text-base py-5 rounded-xl shadow-lg shadow-[#e86100]/25 transition-all disabled:opacity-50">
+                {updating ? <><Loader2 className="size-4 animate-spin mr-2" />Actualizando...</> : <><CheckCircle2 className="size-4 mr-2" />Confirmar</>}
+              </Button>
+            </div>
           </form>
         </DialogContent>
       </Dialog>

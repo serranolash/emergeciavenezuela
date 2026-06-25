@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import ZAI from 'z-ai-web-dev-sdk';
 
 // tipoReporte se calcula dinámicamente: si tiene nombre → "Conocido", si no → "Sin Identificar"
 function computeTipoReporte(nombreCompleto: string | null): string {
@@ -12,6 +11,7 @@ function enrichReporte(r: Record<string, unknown>) {
   return { ...r, tipoReporte: computeTipoReporte(r.nombreCompleto as string | null) };
 }
 
+// ─── POST: Crear reporte ────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
 
     const enriched = enrichReporte(reporte as unknown as Record<string, unknown>);
 
+    // AI analysis — fire and forget, no rompe si no está disponible
     triggerAiAnalysis(reporte.id, {
       tipo_reporte,
       nombre_completo: tipo_reporte === 'Conocido' ? nombre_completo : undefined,
@@ -77,8 +78,6 @@ export async function POST(request: NextRequest) {
       estado,
       contacto,
       nota_adicional,
-    }).catch((err) => {
-      console.error('[AI Analysis] Background error:', err.message);
     });
 
     return NextResponse.json({ success: true, reporte: enriched }, { status: 201 });
@@ -88,6 +87,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// ─── GET: Listar reportes + métricas ────────────────────────────
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -134,11 +134,58 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// ─── PATCH: Actualizar estado de un reporte ─────────────────────
+export async function PATCH(request: NextRequest) {
+  try {
+    const { id, estado, nota_actualizacion } = await request.json();
+
+    if (!id || !estado) {
+      return NextResponse.json(
+        { error: 'Faltan campos: id y estado son requeridos' },
+        { status: 400 }
+      );
+    }
+
+    const allowedEstados = ['A salvo', 'Herido', 'Desaparecido', 'En tránsito'];
+    if (!allowedEstados.includes(estado)) {
+      return NextResponse.json(
+        { error: `Estado inválido. Debe ser uno de: ${allowedEstados.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const reporte = await db.reporteEmergencia.findUnique({ where: { id } });
+    if (!reporte) {
+      return NextResponse.json({ error: 'Reporte no encontrado' }, { status: 404 });
+    }
+
+    const updated = await db.reporteEmergencia.update({
+      where: { id },
+      data: {
+        estado,
+        notaAdicional: nota_actualizacion
+          ? `[ACTUALIZADO] ${nota_actualizacion}\n${reporte.notaAdicional ? `— Anterior: ${reporte.notaAdicional}` : ''}`
+          : reporte.notaAdicional,
+      },
+    });
+
+    const enriched = enrichReporte(updated as unknown as Record<string, unknown>);
+
+    return NextResponse.json({ success: true, reporte: enriched });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Error interno del servidor';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+// ─── AI Analysis (gracioso — no rompe si el SDK no existe) ─────
 async function triggerAiAnalysis(
   reporteId: string,
   data: Record<string, string | undefined>
 ) {
   try {
+    // Importación dinámica: si el SDK no existe (Vercel), falla silenciosamente
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
     const zai = await ZAI.create();
 
     const lines: string[] = [`Tipo: ${data.tipo_reporte}`];
@@ -173,8 +220,8 @@ async function triggerAiAnalysis(
       where: { id: reporteId },
       data: { urgenciaAi: urgencia, prioridadDesc },
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[AI Analysis] Error: ${message}`);
+  } catch {
+    // SDK no disponible en Vercel o error de IA — no rompe el reporte
+    console.log('[AI] Análisis de IA no disponible en este entorno. Reporte guardado sin clasificación de urgencia.');
   }
 }
