@@ -5,7 +5,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL") // Necesario si usas Supabase con pooling (ej. Neon o Supabase nativo)
+  directUrl = env("DIRECT_URL") // For migrations (bypasses Supabase pooler)
 }
 
 model ReporteEmergencia {
@@ -20,4 +20,6 @@ model ReporteEmergencia {
   urgenciaAi        Int?
   prioridadDesc     String?
   fechaRegistro     DateTime @default(now())
+
+  @@map("reportes_emergencia")
 }

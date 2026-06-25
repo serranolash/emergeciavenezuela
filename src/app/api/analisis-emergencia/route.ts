@@ -1,15 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { db } from '@/lib/db';
+import ZAI from 'z-ai-web-dev-sdk';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-// ─── POST: Re-analizar urgencia con IA ───────────────────────
 export async function POST(request: NextRequest) {
   try {
     const { reporteId } = await request.json();
@@ -18,71 +10,53 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'reporteId es requerido' }, { status: 400 });
     }
 
-    // Buscar reporte en Supabase
-    const { data: reporte, error: fetchError } = await supabase
-      .from('reportes_emergencia')
-      .select('*')
-      .eq('id', reporteId)
-      .single();
+    const reporte = await db.reporteEmergencia.findUnique({
+      where: { id: reporteId },
+    });
 
-    if (fetchError || !reporte) {
+    if (!reporte) {
       return NextResponse.json({ error: 'Reporte no encontrado' }, { status: 404 });
     }
 
-    // Analizar con Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const zai = await ZAI.create();
 
-    const reportText = [
-      `Nombre: ${reporte.nombre_completo}`,
-      `Ubicación: ${reporte.ubicacion_exacta}`,
-      `Estado: ${reporte.estado}`,
-      `Contacto: ${reporte.contacto}`,
-      reporte.nota_adicional ? `Nota adicional: ${reporte.nota_adicional}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const lines: string[] = [`Tipo: ${reporte.tipoReporte}`];
+    if (reporte.nombreCompleto) lines.push(`Nombre: ${reporte.nombreCompleto}`);
+    if (reporte.descripcionFisica) lines.push(`Descripción física: ${reporte.descripcionFisica}`);
+    lines.push(`Ubicación: ${reporte.ubicacionExacta}`);
+    lines.push(`Estado: ${reporte.estado}`);
+    lines.push(`Contacto: ${reporte.contacto}`);
+    if (reporte.notaAdicional) lines.push(`Nota adicional: ${reporte.notaAdicional}`);
 
-    const result = await model.generateContent({
-      contents: [
+    const completion = await zai.chat.completions.create({
+      messages: [
+        {
+          role: 'assistant',
+          content:
+            'Analiza este reporte de emergencia y clasifica la urgencia de 1 a 5. Devuelve solo un JSON: {"urgencia": int, "prioridad_desc": string}',
+        },
         {
           role: 'user',
-          parts: [
-            {
-              text: `Analiza este reporte de emergencia y clasifica la urgencia de 1 a 5. Devuelve solo un JSON: {"urgencia": int, "prioridad_desc": string}\n\n${reportText}`,
-            },
-          ],
+          content: lines.join('\n'),
         },
       ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 100,
-      },
+      thinking: { type: 'disabled' },
     });
 
-    const raw = result.response.text().trim();
+    const raw = completion.choices[0]?.message?.content?.trim() || '';
     const jsonMatch = raw.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) {
-      return NextResponse.json(
-        { error: 'La IA no devolvió un JSON válido', raw },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'La IA no devolvió un JSON válido', raw }, { status: 500 });
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     const urgencia = Math.max(1, Math.min(5, Number(parsed.urgencia) || 3));
     const prioridadDesc = String(parsed.prioridad_desc || 'Sin clasificación');
 
-    // Actualizar en Supabase
-    const { data: updated, error: updateError } = await supabase
-      .from('reportes_emergencia')
-      .update({ urgencia_ai: urgencia, prioridad_desc: prioridadDesc })
-      .eq('id', reporteId)
-      .select()
-      .single();
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
-    }
+    const updated = await db.reporteEmergencia.update({
+      where: { id: reporteId },
+      data: { urgenciaAi: urgencia, prioridadDesc },
+    });
 
     return NextResponse.json({ success: true, reporte: updated });
   } catch (error: unknown) {
