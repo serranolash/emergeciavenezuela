@@ -3,18 +3,21 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Necesario si usas Supabase con pooling (ej. Neon o Supabase nativo)
 }
 
 model ReporteEmergencia {
   id              String   @id @default(cuid())
   nombreCompleto  String
   ubicacionExacta String
-  estado          String   @default("Desaparecido") // A salvo / Herido / Desaparecido
+  estado          String   @default("Desaparecido") 
   contacto        String
   notaAdicional   String?
   urgenciaAi      Int?
   prioridadDesc   String?
-  fechaRegistro   DateTime @default(now())
+  fechaRegistro   DateTime @default(now()) @map("fecha_registro")
+
+  @@map("reportes_emergencia") // Esto es buena práctica para nombres de tabla en Postgres
 }
