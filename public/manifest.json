@@ -1,0 +1,32 @@
+{
+  "name": "EmergenciaVE - Reportes de Emergencia",
+  "short_name": "EmergenciaVE",
+  "description": "Sistema de respuesta rápida para reportar y buscar personas tras un desastre natural",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#e86100",
+  "orientation": "portrait-primary",
+  "categories": ["utilities", "emergency"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuevo Reporte",
+      "url": "/",
+      "description": "Crear un nuevo reporte de emergencia"
+    }
+  ]
+}

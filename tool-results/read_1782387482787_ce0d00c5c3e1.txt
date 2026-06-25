@@ -1,0 +1,718 @@
+     1→"use client";
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from "react";
+     4→import { motion, AnimatePresence } from "framer-motion";
+     5→import {
+     6→  Search,
+     7→  Plus,
+     8→  MapPin,
+     9→  Phone,
+    10→  User,
+    11→  AlertTriangle,
+    12→  Shield,
+    13→  Heart,
+    14→  Eye,
+    15→  Clock,
+    16→  Loader2,
+    17→  WifiOff,
+    18→  Send,
+    19→  X,
+    20→  Activity,
+    21→  FileText,
+    22→} from "lucide-react";
+    23→import { Button } from "@/components/ui/button";
+    24→import { Input } from "@/components/ui/input";
+    25→import { Textarea } from "@/components/ui/textarea";
+    26→import { Label } from "@/components/ui/label";
+    27→import { Badge } from "@/components/ui/badge";
+    28→import { Card, CardContent } from "@/components/ui/card";
+    29→import {
+    30→  Dialog,
+    31→  DialogContent,
+    32→  DialogHeader,
+    33→  DialogTitle,
+    34→  DialogDescription,
+    35→} from "@/components/ui/dialog";
+    36→import {
+    37→  Select,
+    38→  SelectContent,
+    39→  SelectItem,
+    40→  SelectTrigger,
+    41→  SelectValue,
+    42→} from "@/components/ui/select";
+    43→import { Skeleton } from "@/components/ui/skeleton";
+    44→import { useToast } from "@/hooks/use-toast";
+    45→
+    46→// --- Types ---
+    47→interface Reporte {
+    48→  id: string;
+    49→  nombreCompleto: string;
+    50→  ubicacionExacta: string;
+    51→  estado: string;
+    52→  contacto: string;
+    53→  notaAdicional: string | null;
+    54→  urgenciaAi: number | null;
+    55→  prioridadDesc: string | null;
+    56→  fechaRegistro: string;
+    57→}
+    58→
+    59→type EstadoType = "A salvo" | "Herido" | "Desaparecido";
+    60→
+    61→// --- Urgency Config ---
+    62→const urgencyConfig: Record<number, { label: string; color: string; bg: string }> = {
+    63→  1: { label: "Baja", color: "text-emergency-safe", bg: "bg-emergency-safe/10 border-emergency-safe/30" },
+    64→  2: { label: "Moderada", color: "text-urgency-2", bg: "bg-urgency-2/10 border-urgency-2/30" },
+    65→  3: { label: "Media", color: "text-urgency-3", bg: "bg-urgency-3/10 border-urgency-3/30" },
+    66→  4: { label: "Alta", color: "text-urgency-4", bg: "bg-urgency-4/10 border-urgency-4/30" },
+    67→  5: { label: "Crítica", color: "text-urgency-5", bg: "bg-urgency-5/10 border-urgency-5/30" },
+    68→};
+    69→
+    70→const estadoConfig: Record<EstadoType, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
+    71→  "A salvo": { label: "A salvo", color: "text-emergency-safe", bg: "bg-emergency-safe/15", icon: <Shield className="size-4" /> },
+    72→  Herido: { label: "Herido", color: "text-emergency-injured", bg: "bg-emergency-injured/15", icon: <Heart className="size-4" /> },
+    73→  Desaparecido: { label: "Desaparecido", color: "text-emergency-missing", bg: "bg-emergency-missing/15", icon: <Eye className="size-4" /> },
+    74→};
+    75→
+    76→// --- Helpers ---
+    77→function formatRelativeTime(dateStr: string): string {
+    78→  const now = new Date();
+    79→  const date = new Date(dateStr);
+    80→  const diffMs = now.getTime() - date.getTime();
+    81→  const diffMins = Math.floor(diffMs / 60000);
+    82→  if (diffMins < 1) return "Ahora";
+    83→  if (diffMins < 60) return `Hace ${diffMins} min`;
+    84→  const diffHours = Math.floor(diffMins / 60);
+    85→  if (diffHours < 24) return `Hace ${diffHours}h`;
+    86→  const diffDays = Math.floor(diffHours / 24);
+    87→  return `Hace ${diffDays}d`;
+    88→}
+    89→
+    90→// --- Component ---
+    91→export default function EmergenciaPage() {
+    92→  const [reportes, setReportes] = useState<Reporte[]>([]);
+    93→  const [filteredReportes, setFilteredReportes] = useState<Reporte[]>([]);
+    94→  const [searchQuery, setSearchQuery] = useState("");
+    95→  const [loading, setLoading] = useState(true);
+    96→  const [submitting, setSubmitting] = useState(false);
+    97→  const [dialogOpen, setDialogOpen] = useState(false);
+    98→  const [isOnline, setIsOnline] = useState(true);
+    99→  const [stats, setStats] = useState({ total: 0, salvo: 0, herido: 0, desaparecido: 0 });
+   100→  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+   101→
+   102→  // Form state
+   103→  const [formData, setFormData] = useState({
+   104→    nombre_completo: "",
+   105→    ubicacion_exacta: "",
+   106→    estado: "" as EstadoType | "",
+   107→    contacto: "",
+   108→    nota_adicional: "",
+   109→  });
+   110→  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+   111→
+   112→  const { toast } = useToast();
+   113→
+   114→  // Fetch reports
+   115→  const fetchReportes = useCallback(async (query?: string) => {
+   116→    try {
+   117→      setLoading(true);
+   118→      const url = query ? `/api/reportes?q=${encodeURIComponent(query)}` : "/api/reportes";
+   119→      const res = await fetch(url);
+   120→      if (!res.ok) throw new Error("Error al cargar reportes");
+   121→      const data = await res.json();
+   122→      setReportes(data.reportes);
+   123→    } catch {
+   124→      toast({ title: "Error", description: "No se pudieron cargar los reportes", variant: "destructive" });
+   125→    } finally {
+   126→      setLoading(false);
+   127→    }
+   128→  }, [toast]);
+   129→
+   130→  useEffect(() => {
+   131→    fetchReportes();
+   132→  }, [fetchReportes]);
+   133→
+   134→  // Debounced search
+   135→  useEffect(() => {
+   136→    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+   137→    searchTimeout.current = setTimeout(() => {
+   138→      if (searchQuery.trim().length === 0) {
+   139→        setFilteredReportes(reportes);
+   140→      } else {
+   141→        const q = searchQuery.toLowerCase();
+   142→        const filtered = reportes.filter(
+   143→          (r) =>
+   144→            r.nombreCompleto.toLowerCase().includes(q) ||
+   145→            r.ubicacionExacta.toLowerCase().includes(q)
+   146→        );
+   147→        setFilteredReportes(filtered);
+   148→      }
+   149→    }, 250);
+   150→    return () => {
+   151→      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+   152→    };
+   153→  }, [searchQuery, reportes]);
+   154→
+   155→  // Stats
+   156→  useEffect(() => {
+   157→    setStats({
+   158→      total: reportes.length,
+   159→      salvo: reportes.filter((r) => r.estado === "A salvo").length,
+   160→      herido: reportes.filter((r) => r.estado === "Herido").length,
+   161→      desaparecido: reportes.filter((r) => r.estado === "Desaparecido").length,
+   162→    });
+   163→  }, [reportes]);
+   164→
+   165→  // Online/offline detection
+   166→  useEffect(() => {
+   167→    const handleOnline = () => {
+   168→      setIsOnline(true);
+   169→      // Sync pending reports
+   170→      const pending = localStorage.getItem("pendingReports");
+   171→      if (pending) {
+   172→        try {
+   173→          const reports = JSON.parse(pending) as Array<Record<string, unknown>>;
+   174→          reports.forEach(async (report) => {
+   175→            try {
+   176→              await fetch("/api/reportes", {
+   177→                method: "POST",
+   178→                headers: { "Content-Type": "application/json" },
+   179→                body: JSON.stringify(report),
+   180→              });
+   181→            } catch {
+   182→              // silently fail
+   183→            }
+   184→          });
+   185→          localStorage.removeItem("pendingReports");
+   186→          toast({ title: "Sincronizado", description: `${reports.length} reporte(s) pendiente(s) enviado(s)` });
+   187→          fetchReportes();
+   188→        } catch {
+   189→          // ignore parse error
+   190→        }
+   191→      }
+   192→    };
+   193→    const handleOffline = () => setIsOnline(false);
+   194→    window.addEventListener("online", handleOnline);
+   195→    window.addEventListener("offline", handleOffline);
+   196→    setIsOnline(navigator.onLine);
+   197→    return () => {
+   198→      window.removeEventListener("online", handleOnline);
+   199→      window.removeEventListener("offline", handleOffline);
+   200→    };
+   201→  }, [toast, fetchReportes]);
+   202→
+   203→  // Form validation
+   204→  function validateForm(): boolean {
+   205→    const errors: Record<string, string> = {};
+   206→    if (!formData.nombre_completo.trim()) errors.nombre_completo = "Nombre completo requerido";
+   207→    if (!formData.ubicacion_exacta.trim()) errors.ubicacion_exacta = "Ubicación requerida";
+   208→    if (!formData.estado) errors.estado = "Seleccione un estado";
+   209→    if (!formData.contacto.trim()) errors.contacto = "Contacto requerido";
+   210→    setFormErrors(errors);
+   211→    return Object.keys(errors).length === 0;
+   212→  }
+   213→
+   214→  // Submit report
+   215→  async function handleSubmit() {
+   216→    if (!validateForm()) return;
+   217→    setSubmitting(true);
+   218→
+   219→    const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+   220→    const payload = {
+   221→      id,
+   222→      nombre_completo: formData.nombre_completo.trim(),
+   223→      ubicacion_exacta: formData.ubicacion_exacta.trim(),
+   224→      estado: formData.estado,
+   225→      contacto: formData.contacto.trim(),
+   226→      nota_adicional: formData.nota_adicional.trim() || undefined,
+   227→    };
+   228→
+   229→    try {
+   230→      if (!navigator.onLine) {
+   231→        // Save locally for later sync
+   232→        const pending = JSON.parse(localStorage.getItem("pendingReports") || "[]");
+   233→        pending.push({ ...payload, timestamp: Date.now() });
+   234→        localStorage.setItem("pendingReports", JSON.stringify(pending));
+   235→        toast({
+   236→          title: "Guardado offline",
+   237→          description: "Se enviará al recuperar conexión",
+   238→          variant: "default",
+   239→        });
+   240→      } else {
+   241→        const res = await fetch("/api/reportes", {
+   242→          method: "POST",
+   243→          headers: { "Content-Type": "application/json" },
+   244→          body: JSON.stringify(payload),
+   245→        });
+   246→        const data = await res.json();
+   247→        if (!res.ok) throw new Error(data.error || "Error al enviar reporte");
+   248→        toast({ title: "Reporte enviado", description: "La IA está analizando la urgencia..." });
+   249→      }
+   250→
+   251→      // Reset form and close
+   252→      setFormData({ nombre_completo: "", ubicacion_exacta: "", estado: "", contacto: "", nota_adicional: "" });
+   253→      setFormErrors({});
+   254→      setDialogOpen(false);
+   255→      fetchReportes();
+   256→    } catch (error: unknown) {
+   257→      const msg = error instanceof Error ? error.message : "Error desconocido";
+   258→      toast({ title: "Error", description: msg, variant: "destructive" });
+   259→    } finally {
+   260→      setSubmitting(false);
+   261→    }
+   262→  }
+   263→
+   264→  return (
+   265→    <div className="min-h-screen flex flex-col">
+   266→      {/* Offline Banner */}
+   267→      <AnimatePresence>
+   268→        {!isOnline && (
+   269→          <motion.div
+   270→            initial={{ height: 0, opacity: 0 }}
+   271→            animate={{ height: "auto", opacity: 1 }}
+   272→            exit={{ height: 0, opacity: 0 }}
+   273→            className="bg-urgency-5 text-white text-center py-2 px-4 text-sm font-medium flex items-center justify-center gap-2 overflow-hidden"
+   274→          >
+   275→            <WifiOff className="size-4" />
+   276→            Sin conexión — Los reportes se guardarán localmente
+   277→          </motion.div>
+   278→        )}
+   279→      </AnimatePresence>
+   280→
+   281→      {/* Header */}
+   282→      <header className="bg-[#1a1a1a] text-white sticky top-0 z-40 shadow-lg">
+   283→        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+   284→          <div className="flex items-center gap-3">
+   285→            <div className="bg-[#e86100] rounded-lg p-2">
+   286→              <AlertTriangle className="size-5 text-white" />
+   287→            </div>
+   288→            <div>
+   289→              <h1 className="text-lg sm:text-xl font-bold tracking-tight">EmergenciaAR</h1>
+   290→              <p className="text-xs text-gray-400 hidden sm:block">Sistema Nacional de Reportes de Emergencia</p>
+   291→            </div>
+   292→          </div>
+   293→          <div className="flex items-center gap-2">
+   294→            <div className={`hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full ${isOnline ? "bg-emergency-safe/20 text-emergency-safe" : "bg-urgency-5/20 text-urgency-5"}`}>
+   295→              <span className={`size-2 rounded-full ${isOnline ? "bg-emergency-safe" : "bg-urgency-5 urgency-pulse"}`} />
+   296→              {isOnline ? "En línea" : "Sin conexión"}
+   297→            </div>
+   298→            <Button
+   299→              onClick={() => setDialogOpen(true)}
+   300→              className="bg-[#e86100] hover:bg-[#d45700] text-white font-semibold gap-2 rounded-xl px-4 sm:px-5 py-5 sm:py-2.5 text-base sm:text-sm shadow-lg shadow-[#e86100]/25 transition-all active:scale-95"
+   301→              size="lg"
+   302→            >
+   303→              <Plus className="size-5 sm:size-4" />
+   304→              <span className="sm:hidden">Reportar</span>
+   305→              <span className="hidden sm:inline">Nuevo Reporte</span>
+   306→            </Button>
+   307→          </div>
+   308→        </div>
+   309→      </header>
+   310→
+   311→      {/* Hero Section */}
+   312→      <section className="relative overflow-hidden">
+   313→        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/30 to-transparent z-10" />
+   314→        <img
+   315→          src="/hero-emergency.png"
+   316→          alt="Emergencia"
+   317→          className="w-full h-48 sm:h-64 md:h-72 object-cover"
+   318→        />
+   319→        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center text-white text-center px-4">
+   320→          <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.6 }}>
+   321→            <h2 className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight drop-shadow-lg">
+   322→              Reporta. Busca. <span className="text-[#ff8c33]">Rescata.</span>
+   323→            </h2>
+   324→            <p className="mt-2 text-sm sm:text-base md:text-lg text-gray-200 max-w-xl mx-auto">
+   325→              Plataforma de respuesta rápida para localizar personas tras un desastre natural
+   326→            </p>
+   327→          </motion.div>
+   328→        </div>
+   329→      </section>
+   330→
+   331→      {/* Main Content */}
+   332→      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-6 space-y-6">
+   333→        {/* Stats Cards */}
+   334→        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+   335→          {[
+   336→            { label: "Total Reportes", value: stats.total, icon: <FileText className="size-5" />, color: "text-[#e86100]", bg: "bg-[#e86100]/10 border-[#e86100]/20" },
+   337→            { label: "A salvo", value: stats.salvo, icon: <Shield className="size-5" />, color: "text-emergency-safe", bg: "bg-emergency-safe/10 border-emergency-safe/20" },
+   338→            { label: "Heridos", value: stats.herido, icon: <Heart className="size-5" />, color: "text-emergency-injured", bg: "bg-emergency-injured/10 border-emergency-injured/20" },
+   339→            { label: "Desaparecidos", value: stats.desaparecido, icon: <Eye className="size-5" />, color: "text-emergency-missing", bg: "bg-emergency-missing/10 border-emergency-missing/20" },
+   340→          ].map((stat) => (
+   341→            <motion.div key={stat.label} initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.3 }}>
+   342→              <Card className={`border ${stat.bg} backdrop-blur-sm`}>
+   343→                <CardContent className="p-3 sm:p-4 flex items-center gap-3">
+   344→                  <div className={`${stat.color} p-2 rounded-lg`}>{stat.icon}</div>
+   345→                  <div>
+   346→                    <p className="text-2xl sm:text-3xl font-bold">{stat.value}</p>
+   347→                    <p className="text-xs sm:text-sm text-muted-foreground">{stat.label}</p>
+   348→                  </div>
+   349→                </CardContent>
+   350→              </Card>
+   351→            </motion.div>
+   352→          ))}
+   353→        </div>
+   354→
+   355→        {/* Search Bar */}
+   356→        <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="relative">
+   357→          <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-muted-foreground pointer-events-none" />
+   358→          <Input
+   359→            value={searchQuery}
+   360→            onChange={(e) => setSearchQuery(e.target.value)}
+   361→            placeholder="Buscar por nombre o ubicación..."
+   362→            className="pl-12 pr-10 py-6 sm:py-5 text-base sm:text-lg rounded-2xl border-2 border-[#d4d4d4] focus:border-[#e86100] bg-white shadow-sm transition-colors h-auto"
+   363→          />
+   364→          {searchQuery && (
+   365→            <button
+   366→              onClick={() => setSearchQuery("")}
+   367→              className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+   368→            >
+   369→              <X className="size-5" />
+   370→            </button>
+   371→          )}
+   372→        </motion.div>
+   373→
+   374→        {/* Filter by status */}
+   375→        <div className="flex flex-wrap gap-2">
+   376→          {(["Todos", "A salvo", "Herido", "Desaparecido"] as const).map((filter) => {
+   377→            const count =
+   378→              filter === "Todos"
+   379→                ? filteredReportes.length
+   380→                : filteredReportes.filter((r) => r.estado === filter).length;
+   381→            return (
+   382→              <button
+   383→                key={filter}
+   384→                onClick={() => {
+   385→                  if (filter === "Todos") {
+   386→                    setSearchQuery("");
+   387→                    setFilteredReportes(reportes);
+   388→                  } else {
+   389→                    setFilteredReportes(reportes.filter((r) => r.estado === filter));
+   390→                    setSearchQuery("");
+   391→                  }
+   392→                }}
+   393→                className="px-4 py-2 rounded-full text-sm font-medium border border-[#d4d4d4] bg-white hover:bg-[#fff3e6] hover:border-[#e86100] transition-all active:scale-95"
+   394→              >
+   395→                {filter}{" "}
+   396→                <span className="text-muted-foreground font-normal">({count})</span>
+   397→              </button>
+   398→            );
+   399→          })}
+   400→        </div>
+   401→
+   402→        {/* Reports List */}
+   403→        <section>
+   404→          {loading ? (
+   405→            <div className="grid gap-3">
+   406→              {Array.from({ length: 3 }).map((_, i) => (
+   407→                <Card key={i} className="border border-[#d4d4d4]">
+   408→                  <CardContent className="p-4 sm:p-6">
+   409→                    <div className="flex items-start gap-4">
+   410→                      <Skeleton className="size-12 rounded-full" />
+   411→                      <div className="flex-1 space-y-2">
+   412→                        <Skeleton className="h-5 w-48" />
+   413→                        <Skeleton className="h-4 w-32" />
+   414→                        <Skeleton className="h-4 w-full max-w-sm" />
+   415→                      </div>
+   416→                    </div>
+   417→                  </CardContent>
+   418→                </Card>
+   419→              ))}
+   420→            </div>
+   421→          ) : filteredReportes.length === 0 ? (
+   422→            <motion.div
+   423→              initial={{ opacity: 0 }}
+   424→              animate={{ opacity: 1 }}
+   425→              className="text-center py-16 px-4"
+   426→            >
+   427→              <div className="bg-gray-100 rounded-full w-20 h-20 mx-auto flex items-center justify-center mb-4">
+   428→                <Search className="size-8 text-gray-400" />
+   429→              </div>
+   430→              <h3 className="text-lg font-semibold text-gray-600">
+   431→                {searchQuery || reportes.length === 0
+   432→                  ? "No se encontraron reportes"
+   433→                  : "Sin resultados"}
+   434→              </h3>
+   435→              <p className="text-sm text-gray-400 mt-1 max-w-sm mx-auto">
+   436→                {reportes.length === 0
+   437→                  ? "Aún no hay reportes. Sé el primero en reportar una persona."
+   438→                  : "Intenta con otro nombre o ubicación."}
+   439→              </p>
+   440→              {!searchQuery && reportes.length === 0 && (
+   441→                <Button
+   442→                  onClick={() => setDialogOpen(true)}
+   443→                  className="mt-6 bg-[#e86100] hover:bg-[#d45700] text-white font-semibold rounded-xl px-6 py-6 text-base shadow-lg shadow-[#e86100]/25"
+   444→                  size="lg"
+   445→                >
+   446→                  <Plus className="size-5 mr-2" />
+   447→                  Crear primer reporte
+   448→                </Button>
+   449→              )}
+   450→            </motion.div>
+   451→          ) : (
+   452→            <div className="grid gap-3 custom-scrollbar max-h-[60vh] overflow-y-auto pr-1">
+   453→              <AnimatePresence mode="popLayout">
+   454→                {filteredReportes.map((reporte, index) => (
+   455→                  <motion.div
+   456→                    key={reporte.id}
+   457→                    initial={{ opacity: 0, y: 10 }}
+   458→                    animate={{ opacity: 1, y: 0 }}
+   459→                    exit={{ opacity: 0, y: -10 }}
+   460→                    transition={{ duration: 0.2, delay: index * 0.03 }}
+   461→                  >
+   462→                    <Card className="border border-[#d4d4d4] bg-white hover:shadow-md transition-all hover:border-[#e86100]/30 group">
+   463→                      <CardContent className="p-4 sm:p-6">
+   464→                        <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
+   465→                          {/* Avatar with status */}
+   466→                          <div
+   467→                            className={`shrink-0 size-12 sm:size-14 rounded-full flex items-center justify-center text-white font-bold text-lg ${
+   468→                              reporte.estado === "A salvo"
+   469→                                ? "bg-emergency-safe"
+   470→                                : reporte.estado === "Herido"
+   471→                                ? "bg-emergency-injured"
+   472→                                : "bg-[#e86100]"
+   473→                            }`}
+   474→                          >
+   475→                            {reporte.nombreCompleto.charAt(0).toUpperCase()}
+   476→                          </div>
+   477→
+   478→                          <div className="flex-1 min-w-0">
+   479→                            {/* Name + badges row */}
+   480→                            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+   481→                              <h3 className="text-base sm:text-lg font-bold truncate">
+   482→                                {reporte.nombreCompleto}
+   483→                              </h3>
+   484→                              <Badge
+   485→                                variant="outline"
+   486→                                className={`${estadoConfig[reporte.estado as EstadoType]?.bg} ${estadoConfig[reporte.estado as EstadoType]?.color} border gap-1 text-xs font-semibold`}
+   487→                              >
+   488→                                {estadoConfig[reporte.estado as EstadoType]?.icon}
+   489→                                {estadoConfig[reporte.estado as EstadoType]?.label}
+   490→                              </Badge>
+   491→                              {reporte.urgenciaAi && (
+   492→                                <Badge
+   493→                                  variant="outline"
+   494→                                  className={`${urgencyConfig[reporte.urgenciaAi]?.bg} ${urgencyConfig[reporte.urgenciaAi]?.color} border gap-1 text-xs font-semibold ${reporte.urgenciaAi >= 4 ? "urgency-pulse" : ""}`}
+   495→                                >
+   496→                                  <Activity className="size-3" />
+   497→                                  {reporte.urgenciaAi}/5 — {reporte.prioridadDesc || urgencyConfig[reporte.urgenciaAi]?.label}
+   498→                                </Badge>
+   499→                              )}
+   500→                            </div>
+   501→
+   502→                            {/* Location */}
+   503→                            <div className="flex items-center gap-1.5 text-sm text-muted-foreground mb-1">
+   504→                              <MapPin className="size-3.5 shrink-0" />
+   505→                              <span className="truncate">{reporte.ubicacionExacta}</span>
+   506→                            </div>
+   507→
+   508→                            {/* Contact */}
+   509→                            <div className="flex items-center gap-1.5 text-sm text-muted-foreground mb-2">
+   510→                              <Phone className="size-3.5 shrink-0" />
+   511→                              <span>{reporte.contacto}</span>
+   512→                            </div>
+   513→
+   514→                            {/* Note */}
+   515→                            {reporte.notaAdicional && (
+   516→                              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2 mb-2 border border-gray-100">
+   517→                                {reporte.notaAdicional}
+   518→                              </p>
+   519→                            )}
+   520→
+   521→                            {/* Timestamp */}
+   522→                            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+   523→                              <Clock className="size-3" />
+   524→                              {formatRelativeTime(reporte.fechaRegistro)}
+   525→                            </div>
+   526→                          </div>
+   527→                        </div>
+   528→                      </CardContent>
+   529→                    </Card>
+   530→                  </motion.div>
+   531→                ))}
+   532→              </AnimatePresence>
+   533→            </div>
+   534→          )}
+   535→        </section>
+   536→      </main>
+   537→
+   538→      {/* Floating Mobile Button */}
+   539→      <button
+   540→        onClick={() => setDialogOpen(true)}
+   541→        className="sm:hidden fixed bottom-6 right-6 z-50 bg-[#e86100] text-white rounded-full p-4 shadow-2xl shadow-[#e86100]/40 active:scale-90 transition-transform"
+   542→        aria-label="Nuevo reporte"
+   543→      >
+   544→        <Plus className="size-7" />
+   545→      </button>
+   546→
+   547→      {/* New Report Dialog */}
+   548→      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+   549→        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+   550→          <DialogHeader>
+   551→            <DialogTitle className="text-xl font-bold flex items-center gap-2 text-[#1a1a1a]">
+   552→              <div className="bg-[#e86100] rounded-lg p-1.5">
+   553→                <Send className="size-4 text-white" />
+   554→              </div>
+   555→              Nuevo Reporte de Emergencia
+   556→            </DialogTitle>
+   557→            <DialogDescription>
+   558→              Complete la información de la persona. La IA analizará automáticamente el nivel de urgencia.
+   559→            </DialogDescription>
+   560→          </DialogHeader>
+   561→
+   562→          <form
+   563→            onSubmit={(e) => {
+   564→              e.preventDefault();
+   565→              handleSubmit();
+   566→            }}
+   567→            className="space-y-4 mt-2"
+   568→          >
+   569→            {/* Nombre completo */}
+   570→            <div className="space-y-2">
+   571→              <Label htmlFor="nombre" className="text-sm font-semibold text-[#1a1a1a]">
+   572→                <User className="size-4 inline mr-1.5 text-[#e86100]" />
+   573→                Nombre completo *
+   574→              </Label>
+   575→              <Input
+   576→                id="nombre"
+   577→                value={formData.nombre_completo}
+   578→                onChange={(e) => setFormData({ ...formData, nombre_completo: e.target.value })}
+   579→                placeholder="Ej: María García López"
+   580→                className={`py-5 text-base rounded-xl ${formErrors.nombre_completo ? "border-emergency-injured" : "border-[#d4d4d4] focus:border-[#e86100]"}`}
+   581→              />
+   582→              {formErrors.nombre_completo && (
+   583→                <p className="text-xs text-emergency-injured">{formErrors.nombre_completo}</p>
+   584→              )}
+   585→            </div>
+   586→
+   587→            {/* Ubicación */}
+   588→            <div className="space-y-2">
+   589→              <Label htmlFor="ubicacion" className="text-sm font-semibold text-[#1a1a1a]">
+   590→                <MapPin className="size-4 inline mr-1.5 text-[#e86100]" />
+   591→                Ubicación exacta *
+   592→              </Label>
+   593→              <Input
+   594→                id="ubicacion"
+   595→                value={formData.ubicacion_exacta}
+   596→                onChange={(e) => setFormData({ ...formData, ubicacion_exacta: e.target.value })}
+   597→                placeholder="Ej: Barrio San Martín, calle 123, Posadas"
+   598→                className={`py-5 text-base rounded-xl ${formErrors.ubicacion_exacta ? "border-emergency-injured" : "border-[#d4d4d4] focus:border-[#e86100]"}`}
+   599→              />
+   600→              {formErrors.ubicacion_exacta && (
+   601→                <p className="text-xs text-emergency-injured">{formErrors.ubicacion_exacta}</p>
+   602→              )}
+   603→            </div>
+   604→
+   605→            {/* Estado */}
+   606→            <div className="space-y-2">
+   607→              <Label className="text-sm font-semibold text-[#1a1a1a]">
+   608→                <Activity className="size-4 inline mr-1.5 text-[#e86100]" />
+   609→                Estado *
+   610→              </Label>
+   611→              <Select
+   612→                value={formData.estado}
+   613→                onValueChange={(val) => setFormData({ ...formData, estado: val as EstadoType })}
+   614→              >
+   615→                <SelectTrigger
+   616→                  className={`w-full py-5 text-base rounded-xl ${formErrors.estado ? "border-emergency-injured" : "border-[#d4d4d4]"}`}
+   617→                >
+   618→                  <SelectValue placeholder="Seleccionar estado..." />
+   619→                </SelectTrigger>
+   620→                <SelectContent>
+   621→                  <SelectItem value="A salvo">
+   622→                    <span className="flex items-center gap-2">
+   623→                      <span className="size-2.5 rounded-full bg-emergency-safe" />
+   624→                      A salvo
+   625→                    </span>
+   626→                  </SelectItem>
+   627→                  <SelectItem value="Herido">
+   628→                    <span className="flex items-center gap-2">
+   629→                      <span className="size-2.5 rounded-full bg-emergency-injured" />
+   630→                      Herido
+   631→                    </span>
+   632→                  </SelectItem>
+   633→                  <SelectItem value="Desaparecido">
+   634→                    <span className="flex items-center gap-2">
+   635→                      <span className="size-2.5 rounded-full bg-[#e86100]" />
+   636→                      Desaparecido
+   637→                    </span>
+   638→                  </SelectItem>
+   639→                </SelectContent>
+   640→              </Select>
+   641→              {formErrors.estado && (
+   642→                <p className="text-xs text-emergency-injured">{formErrors.estado}</p>
+   643→              )}
+   644→            </div>
+   645→
+   646→            {/* Contacto */}
+   647→            <div className="space-y-2">
+   648→              <Label htmlFor="contacto" className="text-sm font-semibold text-[#1a1a1a]">
+   649→                <Phone className="size-4 inline mr-1.5 text-[#e86100]" />
+   650→                Teléfono o contacto *
+   651→              </Label>
+   652→              <Input
+   653→                id="contacto"
+   654→                value={formData.contacto}
+   655→                onChange={(e) => setFormData({ ...formData, contacto: e.target.value })}
+   656→                placeholder="Ej: +54 3764 555-1234"
+   657→                className={`py-5 text-base rounded-xl ${formErrors.contacto ? "border-emergency-injured" : "border-[#d4d4d4] focus:border-[#e86100]"}`}
+   658→              />
+   659→              {formErrors.contacto && (
+   660→                <p className="text-xs text-emergency-injured">{formErrors.contacto}</p>
+   661→              )}
+   662→            </div>
+   663→
+   664→            {/* Nota adicional */}
+   665→            <div className="space-y-2">
+   666→              <Label htmlFor="nota" className="text-sm font-semibold text-[#1a1a1a]">
+   667→                <FileText className="size-4 inline mr-1.5 text-[#e86100]" />
+   668→                Nota adicional (opcional)
+   669→              </Label>
+   670→              <Textarea
+   671→                id="nota"
+   672→                value={formData.nota_adicional}
+   673→                onChange={(e) => setFormData({ ...formData, nota_adicional: e.target.value })}
+   674→                placeholder="Información extra: heridas visibles, necesidades, última vez visto..."
+   675→                className="py-4 text-base rounded-xl border-[#d4d4d4] focus:border-[#e86100] min-h-[80px]"
+   676→                rows={3}
+   677→              />
+   678→            </div>
+   679→
+   680→            {/* Submit */}
+   681→            <Button
+   682→              type="submit"
+   683→              disabled={submitting}
+   684→              className="w-full bg-[#e86100] hover:bg-[#d45700] text-white font-bold text-base py-6 rounded-xl shadow-lg shadow-[#e86100]/25 transition-all active:scale-[0.98] disabled:opacity-50"
+   685→            >
+   686→              {submitting ? (
+   687→                <>
+   688→                  <Loader2 className="size-5 animate-spin mr-2" />
+   689→                  Enviando reporte...
+   690→                </>
+   691→              ) : (
+   692→                <>
+   693→                  <Send className="size-5 mr-2" />
+   694→                  Enviar Reporte de Emergencia
+   695→                </>
+   696→              )}
+   697→            </Button>
+   698→          </form>
+   699→        </DialogContent>
+   700→      </Dialog>
+   701→
+   702→      {/* Footer */}
+   703→      <footer className="bg-[#1a1a1a] text-gray-400 mt-auto">
+   704→        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs sm:text-sm">
+   705→          <div className="flex items-center gap-2">
+   706→            <AlertTriangle className="size-4 text-[#e86100]" />
+   707→            <span className="text-white font-semibold">EmergenciaAR</span>
+   708→            <span>— Sistema de Respuesta Rápida</span>
+   709→          </div>
+   710→          <div className="text-center sm:text-right">
+   711→            <p>Potenciado con IA para clasificación de urgencia</p>
+   712→            <p className="text-gray-500 mt-0.5">PWA · Funciona sin conexión</p>
+   713→          </div>
+   714→        </div>
+   715→      </footer>
+   716→    </div>
+   717→  );
+   718→}
