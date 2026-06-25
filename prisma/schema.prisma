@@ -8,18 +8,19 @@ datasource db {
   directUrl = env("DIRECT_URL") // For migrations (bypasses Supabase pooler)
 }
 
+
 model ReporteEmergencia {
-  id                String   @id @default(cuid())
-  tipoReporte       String   // <--- Asegúrate de que este campo esté aquí
-  nombreCompleto    String
-  descripcionFisica String?
-  ubicacionExacta   String
-  estado            String
-  contacto          String
-  notaAdicional     String?
-  urgenciaAi        Int?
-  prioridadDesc     String?
-  fechaRegistro     DateTime @default(now())
+  id                String   @id @default(cuid())              @map("id")
+  tipoReporte       String   @default("Conocido")               @map("tipo_reporte")
+  nombreCompleto    String?                                      @map("nombre_completo")
+  descripcionFisica String?                                      @map("descripcion_fisica")
+  ubicacionExacta   String                                       @map("ubicacion_exacta")
+  estado            String   @default("Desaparecido")            @map("estado")
+  contacto          String                                       @map("contacto")
+  notaAdicional     String?                                      @map("nota_adicional")
+  urgenciaAi        Int?                                         @map("urgencia_ai")
+  prioridadDesc     String?                                      @map("prioridad_desc")
+  fechaRegistro     DateTime @default(now())                    @map("fecha_registro")
 
   @@map("reportes_emergencia")
 }
