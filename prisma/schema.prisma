@@ -9,15 +9,15 @@ datasource db {
 }
 
 model ReporteEmergencia {
-  id              String   @id @default(cuid())
-  nombreCompleto  String
-  ubicacionExacta String
-  estado          String   @default("Desaparecido") 
-  contacto        String
-  notaAdicional   String?
-  urgenciaAi      Int?
-  prioridadDesc   String?
-  fechaRegistro   DateTime @default(now()) @map("fecha_registro")
-
-  @@map("reportes_emergencia") // Esto es buena práctica para nombres de tabla en Postgres
+  id                String   @id @default(cuid())
+  tipoReporte       String   @default("Conocido")       // Conocido / Sin Identificar
+  nombreCompleto    String?                               // null para desconocidos
+  descripcionFisica String?                               // descripción física del desconocido
+  ubicacionExacta   String
+  estado            String   @default("Desaparecido")     // A salvo / Herido / Desaparecido / En tránsito
+  contacto          String
+  notaAdicional     String?
+  urgenciaAi        Int?
+  prioridadDesc     String?
+  fechaRegistro     DateTime @default(now())
 }

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import ZAI from 'z-ai-web-dev-sdk';
+import { createClient } from '@supabase/supabase-js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// ─── POST: Re-analizar urgencia con IA ───────────────────────
 export async function POST(request: NextRequest) {
   try {
     const { reporteId } = await request.json();
@@ -10,55 +18,71 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'reporteId es requerido' }, { status: 400 });
     }
 
-    const reporte = await db.reporteEmergencia.findUnique({
-      where: { id: reporteId },
-    });
+    // Buscar reporte en Supabase
+    const { data: reporte, error: fetchError } = await supabase
+      .from('reportes_emergencia')
+      .select('*')
+      .eq('id', reporteId)
+      .single();
 
-    if (!reporte) {
+    if (fetchError || !reporte) {
       return NextResponse.json({ error: 'Reporte no encontrado' }, { status: 404 });
     }
 
-    const zai = await ZAI.create();
+    // Analizar con Gemini
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const reportText = [
-      `Nombre: ${reporte.nombreCompleto}`,
-      `Ubicación: ${reporte.ubicacionExacta}`,
+      `Nombre: ${reporte.nombre_completo}`,
+      `Ubicación: ${reporte.ubicacion_exacta}`,
       `Estado: ${reporte.estado}`,
       `Contacto: ${reporte.contacto}`,
-      reporte.notaAdicional ? `Nota adicional: ${reporte.notaAdicional}` : '',
+      reporte.nota_adicional ? `Nota adicional: ${reporte.nota_adicional}` : '',
     ]
       .filter(Boolean)
       .join('\n');
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'assistant',
-          content:
-            'Analiza este reporte de emergencia y clasifica la urgencia de 1 a 5. Devuelve solo un JSON: {"urgencia": int, "prioridad_desc": string}',
-        },
+    const result = await model.generateContent({
+      contents: [
         {
           role: 'user',
-          content: reportText,
+          parts: [
+            {
+              text: `Analiza este reporte de emergencia y clasifica la urgencia de 1 a 5. Devuelve solo un JSON: {"urgencia": int, "prioridad_desc": string}\n\n${reportText}`,
+            },
+          ],
         },
       ],
-      thinking: { type: 'disabled' },
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 100,
+      },
     });
 
-    const raw = completion.choices[0]?.message?.content?.trim() || '';
+    const raw = result.response.text().trim();
     const jsonMatch = raw.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) {
-      return NextResponse.json({ error: 'La IA no devolvió un JSON válido', raw }, { status: 500 });
+      return NextResponse.json(
+        { error: 'La IA no devolvió un JSON válido', raw },
+        { status: 500 }
+      );
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     const urgencia = Math.max(1, Math.min(5, Number(parsed.urgencia) || 3));
     const prioridadDesc = String(parsed.prioridad_desc || 'Sin clasificación');
 
-    const updated = await db.reporteEmergencia.update({
-      where: { id: reporteId },
-      data: { urgenciaAi: urgencia, prioridadDesc },
-    });
+    // Actualizar en Supabase
+    const { data: updated, error: updateError } = await supabase
+      .from('reportes_emergencia')
+      .update({ urgencia_ai: urgencia, prioridad_desc: prioridadDesc })
+      .eq('id', reporteId)
+      .select()
+      .single();
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true, reporte: updated });
   } catch (error: unknown) {

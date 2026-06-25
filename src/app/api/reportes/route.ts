@@ -4,16 +4,40 @@ import ZAI from 'z-ai-web-dev-sdk';
 
 export async function POST(request: NextRequest) {
   try {
-    const { id, nombre_completo, ubicacion_exacta, estado, contacto, nota_adicional } = await request.json();
+    const body = await request.json();
+    const {
+      id,
+      tipo_reporte = 'Conocido',
+      nombre_completo,
+      descripcion_fisica,
+      ubicacion_exacta,
+      estado,
+      contacto,
+      nota_adicional,
+    } = body;
 
-    if (!id || !nombre_completo || !ubicacion_exacta || !estado || !contacto) {
+    if (!id || !ubicacion_exacta || !estado || !contacto) {
       return NextResponse.json(
-        { error: 'Faltan campos obligatorios: id, nombre_completo, ubicacion_exacta, estado, contacto' },
+        { error: 'Faltan campos obligatorios: id, ubicacion_exacta, estado, contacto' },
         { status: 400 }
       );
     }
 
-    const allowedEstados = ['A salvo', 'Herido', 'Desaparecido'];
+    if (tipo_reporte === 'Conocido' && !nombre_completo) {
+      return NextResponse.json(
+        { error: 'Para reportes conocidos, el nombre completo es obligatorio' },
+        { status: 400 }
+      );
+    }
+
+    if (tipo_reporte === 'Sin Identificar' && !descripcion_fisica) {
+      return NextResponse.json(
+        { error: 'Para reportes sin identificar, la descripción física es obligatoria' },
+        { status: 400 }
+      );
+    }
+
+    const allowedEstados = ['A salvo', 'Herido', 'Desaparecido', 'En tránsito'];
     if (!allowedEstados.includes(estado)) {
       return NextResponse.json(
         { error: `Estado inválido. Debe ser uno de: ${allowedEstados.join(', ')}` },
@@ -24,7 +48,9 @@ export async function POST(request: NextRequest) {
     const reporte = await db.reporteEmergencia.create({
       data: {
         id,
-        nombreCompleto: nombre_completo,
+        tipoReporte: tipo_reporte,
+        nombreCompleto: tipo_reporte === 'Conocido' ? nombre_completo : null,
+        descripcionFisica: tipo_reporte === 'Sin Identificar' ? descripcion_fisica : null,
         ubicacionExacta: ubicacion_exacta,
         estado,
         contacto,
@@ -32,9 +58,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Trigger AI analysis asynchronously (fire-and-forget with best-effort)
     triggerAiAnalysis(reporte.id, {
+      tipo_reporte,
       nombre_completo,
+      descripcion_fisica,
       ubicacion_exacta,
       estado,
       contacto,
@@ -60,6 +87,7 @@ export async function GET(request: NextRequest) {
           OR: [
             { nombreCompleto: { contains: query } },
             { ubicacionExacta: { contains: query } },
+            { descripcionFisica: { contains: query } },
           ],
         }
       : {};
@@ -67,40 +95,43 @@ export async function GET(request: NextRequest) {
     const reportes = await db.reporteEmergencia.findMany({
       where,
       orderBy: { fechaRegistro: 'desc' },
-      take: 100,
+      take: 200,
     });
 
-    return NextResponse.json({ success: true, reportes });
+    // Compute metrics
+    const metrics = {
+      total: reportes.length,
+      conocidos: reportes.filter((r) => r.tipoReporte === 'Conocido').length,
+      sinIdentificar: reportes.filter((r) => r.tipoReporte === 'Sin Identificar').length,
+      aSalvo: reportes.filter((r) => r.estado === 'A salvo').length,
+      heridos: reportes.filter((r) => r.estado === 'Herido').length,
+      desaparecidos: reportes.filter((r) => r.estado === 'Desaparecido').length,
+      enTransito: reportes.filter((r) => r.estado === 'En tránsito').length,
+      conIa: reportes.filter((r) => r.urgenciaAi !== null).length,
+      pendienteIa: reportes.filter((r) => r.urgenciaAi === null).length,
+    };
+
+    return NextResponse.json({ success: true, reportes, metrics });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-// --- Background AI Analysis ---
-
 async function triggerAiAnalysis(
   reporteId: string,
-  data: {
-    nombre_completo: string;
-    ubicacion_exacta: string;
-    estado: string;
-    contacto: string;
-    nota_adicional?: string;
-  }
+  data: Record<string, string | undefined>
 ) {
   try {
     const zai = await ZAI.create();
 
-    const reportText = [
-      `Nombre: ${data.nombre_completo}`,
-      `Ubicación: ${data.ubicacion_exacta}`,
-      `Estado: ${data.estado}`,
-      `Contacto: ${data.contacto}`,
-      data.nota_adicional ? `Nota adicional: ${data.nota_adicional}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const lines: string[] = [`Tipo: ${data.tipo_reporte}`];
+    if (data.nombre_completo) lines.push(`Nombre: ${data.nombre_completo}`);
+    if (data.descripcion_fisica) lines.push(`Descripción física: ${data.descripcion_fisica}`);
+    lines.push(`Ubicación: ${data.ubicacion_exacta}`);
+    lines.push(`Estado: ${data.estado}`);
+    lines.push(`Contacto: ${data.contacto}`);
+    if (data.nota_adicional) lines.push(`Nota: ${data.nota_adicional}`);
 
     const completion = await zai.chat.completions.create({
       messages: [
@@ -109,22 +140,14 @@ async function triggerAiAnalysis(
           content:
             'Analiza este reporte de emergencia y clasifica la urgencia de 1 a 5. Devuelve solo un JSON: {"urgencia": int, "prioridad_desc": string}',
         },
-        {
-          role: 'user',
-          content: reportText,
-        },
+        { role: 'user', content: lines.join('\n') },
       ],
       thinking: { type: 'disabled' },
     });
 
     const raw = completion.choices[0]?.message?.content?.trim() || '';
-
-    // Extract JSON from possible markdown code blocks
     const jsonMatch = raw.match(/\{[\s\S]*?\}/);
-    if (!jsonMatch) {
-      console.error('[AI Analysis] No JSON found in response:', raw);
-      return;
-    }
+    if (!jsonMatch) return;
 
     const parsed = JSON.parse(jsonMatch[0]);
     const urgencia = Math.max(1, Math.min(5, Number(parsed.urgencia) || 3));
@@ -134,10 +157,8 @@ async function triggerAiAnalysis(
       where: { id: reporteId },
       data: { urgenciaAi: urgencia, prioridadDesc },
     });
-
-    console.log(`[AI Analysis] Reporte ${reporteId} → Urgencia ${urgencia}: ${prioridadDesc}`);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[AI Analysis] Error analyzing reporte ${reporteId}:`, message);
+    console.error(`[AI Analysis] Error: ${message}`);
   }
 }
