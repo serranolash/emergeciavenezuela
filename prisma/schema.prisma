@@ -10,11 +10,11 @@ datasource db {
 
 model ReporteEmergencia {
   id                String   @id @default(cuid())
-  tipoReporte       String   @default("Conocido")       // Conocido / Sin Identificar
-  nombreCompleto    String?                               // null para desconocidos
-  descripcionFisica String?                               // descripción física del desconocido
+  tipoReporte       String   // <--- Asegúrate de que este campo esté aquí
+  nombreCompleto    String
+  descripcionFisica String?
   ubicacionExacta   String
-  estado            String   @default("Desaparecido")     // A salvo / Herido / Desaparecido / En tránsito
+  estado            String
   contacto          String
   notaAdicional     String?
   urgenciaAi        Int?
