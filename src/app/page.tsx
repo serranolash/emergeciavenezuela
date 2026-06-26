@@ -363,7 +363,7 @@ export default function EmergenciaPage() {
               <Button onClick={() => openDialog("conocido")} size="sm" className="bg-[#e86100] hover:bg-[#d45700] text-white font-semibold gap-1.5 rounded-xl px-3 sm:px-4 shadow-lg shadow-[#e86100]/25 active:scale-95 transition-all">
                 <Plus className="size-4" /><span className="hidden sm:inline">Reportar</span>
               </Button>
-              <Button onClick={() => openDialog("desconocido")} size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10 rounded-xl px-3 sm:px-4 active:scale-95 transition-all">
+              <Button onClick={() => openDialog("desconocido")} size="sm" className="bg-red-600 hover:bg-red-700 text-white font-semibold gap-1.5 rounded-xl px-3 sm:px-4 shadow-lg shadow-red-600/25 active:scale-95 transition-all">
                 <HelpCircle className="size-4" /><span className="hidden sm:inline">Desconocido</span>
               </Button>
             </div>
@@ -430,14 +430,18 @@ export default function EmergenciaPage() {
               onClick={() => { setActiveTab(tab.key); setSearchQuery(""); }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg text-sm font-medium transition-all ${
                 activeTab === tab.key
-                  ? "bg-white text-[#e86100] shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? tab.key === "desconocidos"
+                    ? "bg-red-600 text-white shadow-sm shadow-red-300"
+                    : "bg-white text-[#e86100] shadow-sm"
+                  : tab.key === "desconocidos"
+                    ? "text-red-600 font-semibold hover:text-red-800 hover:bg-red-50"
+                    : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {tab.icon}
               <span className="hidden xs:inline">{tab.label}</span>
               {tab.count !== undefined && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? "bg-[#e86100]/10 text-[#e86100]" : "bg-gray-200 text-gray-500"}`}>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? (tab.key === "desconocidos" ? "bg-white/20 text-white" : "bg-[#e86100]/10 text-[#e86100]") : tab.key === "desconocidos" ? "bg-red-100 text-red-600" : "bg-gray-200 text-gray-500"}`}>
                   {tab.count}
                 </span>
               )}
