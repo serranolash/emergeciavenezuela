@@ -84,7 +84,7 @@ function magLabel(tipo: string): { text: string; cls: string } {
 
 // ─── Component ─────────────────────────────────────────────────
 export function NewsSidebar() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // Abierto por defecto para máxima visibilidad
   const [data, setData] = useState<NoticiasData | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabNoticia>("sismos");
