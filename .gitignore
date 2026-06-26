@@ -52,3 +52,10 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+.env
+node_modules
+.next
+dist
+.DS_Store
+*.log

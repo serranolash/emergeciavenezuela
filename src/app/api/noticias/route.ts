@@ -258,93 +258,8 @@ async function fetchTweets(): Promise<Noticia[]> {
   return [];
 }
 
-// ─── Telegram Bot Integration ─────────────────────────────
-interface TgMessage {
-  message_id: number;
-  date: number;
-  text?: string;
-  caption?: string;
-  from?: { first_name?: string; last_name?: string; username?: string };
-  chat?: { title?: string; type?: string; username?: string };
-  photo?: Array<{ file_id: string; file_size?: number }>;
-  forward_from_chat?: { title?: string; username?: string };
-}
-
-// Cache en memoria: acumula mensajes de Telegram para todos los usuarios
-let telegramMessages: Noticia[] = [];
-let telegramOffset = 0;
-const TELEGRAM_MAX_MESSAGES = 50;
-let telegramFetching = false; // Lock para evitar llamadas concurrentes
-
 async function fetchTelegram(): Promise<Noticia[]> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return [];
-
-  // Si ya hay una llamada en curso, devolver cache actual
-  if (telegramFetching) return telegramMessages;
-  telegramFetching = true;
-
-  try {
-    const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${telegramOffset}&limit=100&allowed_updates=["message","channel_post"]&timeout=0`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) {
-      // 409 = conflicto de polling concurrente, ignorar silenciosamente
-      if (res.status !== 409) {
-        console.error('[Noticias] Telegram API:', res.status);
-      }
-      return telegramMessages;
-    }
-    const json = await res.json();
-
-    if (json.ok && json.result?.length > 0) {
-      const newMessages: Noticia[] = [];
-
-      for (const update of json.result) {
-        const msg: TgMessage = update.message || update.channel_post;
-        if (!msg) continue;
-
-        // Extraer texto del mensaje o caption de imagen/video
-        const text = msg.text || msg.caption || '';
-        if (!text.trim()) continue;
-
-        // Filtrar mensajes de sistema (/start, /help, etc.)
-        if (text.startsWith('/') && text.length < 30) continue;
-
-        // Nombre del remitente o canal
-        const senderName = msg.forward_from_chat?.title
-          || msg.chat?.title
-          || [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ')
-          || 'Telegram';
-
-        const sourcePrefix = msg.chat?.type === 'channel' ? '📢' : '💬';
-
-        newMessages.push({
-          id: `tg-${msg.message_id}-${msg.date}`,
-          titulo: text.slice(0, 200),
-          fuente: `${sourcePrefix} ${senderName}`,
-          enlace: msg.chat?.username
-            ? `https://t.me/${msg.chat.username}/${msg.message_id}`
-            : '#',
-          resumen: text.length > 200 ? text.slice(200, 350) : null,
-          fecha: new Date(msg.date * 1000).toISOString(),
-        });
-
-        // Actualizar offset para no releer
-        telegramOffset = update.update_id + 1;
-      }
-
-      // Acumular al inicio (más nuevos primero)
-      telegramMessages = [...newMessages, ...telegramMessages]
-        .slice(0, TELEGRAM_MAX_MESSAGES);
-    }
-
-    return telegramMessages;
-  } catch (err) {
-    console.error('[Noticias] Telegram:', err instanceof Error ? err.message : err);
-    return telegramMessages;
-  } finally {
-    telegramFetching = false;
-  }
+  return [];
 }
 
 // ─── GET Handler ───────────────────────────────────────────────
@@ -361,27 +276,27 @@ export async function GET() {
       cacheSismos = { data: sismos, ts: now };
     }
 
-    // Telegram: siempre fresco (usa su propio cache interno)
-    const tgMsgs = await fetchTelegram();
-
-    // Noticias RSS: caché de 5 min
+    // Noticias: caché de 5 min
     let noticias: Noticia[] = [];
     if (cacheNoticias && now - cacheNoticias.ts < CACHE_NOTICIAS_TTL) {
       noticias = cacheNoticias.data;
     } else {
-      const rss = await fetchNoticias();
-      cacheNoticias = { data: rss, ts: now };
+      const [rss, tweets, telegram] = await Promise.all([
+        fetchNoticias(),
+        fetchTweets(),
+        fetchTelegram(),
+      ]);
+      noticias = [
+        ...tweets.map((t) => ({ ...t, fuente: '𝕏 ' + t.fuente })),
+        ...telegram.map((t) => ({ ...t, fuente: '✈️ ' + t.fuente })),
+        ...rss,
+      ].slice(0, 30);
+      cacheNoticias = { data: noticias, ts: now };
     }
-
-    // Combinar: Telegram primero (más rápido), luego RSS
-    const combined = [
-      ...tgMsgs,
-      ...noticias,
-    ].slice(0, 40);
 
     return NextResponse.json({
       sismos,
-      noticias: combined,
+      noticias,
       timestamp: new Date().toISOString(),
       fuentes: {
         sismos: ['USGS (1h + 24h)', 'EMSC'],
@@ -393,11 +308,11 @@ export async function GET() {
   } catch (error: unknown) {
     console.error('[Noticias API]', error instanceof Error ? error.message : error);
     const sismos = cacheSismos?.data || [];
-    const fallback = [...telegramMessages, ...(cacheNoticias?.data || [])];
+    const noticias = cacheNoticias?.data || [];
     return NextResponse.json({
-      sismos, noticias: fallback,
+      sismos, noticias,
       timestamp: new Date().toISOString(),
-      fuentes: { sismos: ['USGS', 'EMSC'], noticias: RSS_FEEDS.map((f) => f.nombre), twitter: false, telegram: !!process.env.TELEGRAM_BOT_TOKEN },
+      fuentes: { sismos: ['USGS', 'EMSC'], noticias: RSS_FEEDS.map((f) => f.nombre), twitter: false, telegram: false },
     });
   }
 }

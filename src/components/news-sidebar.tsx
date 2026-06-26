@@ -14,7 +14,6 @@ import {
   Zap,
   X,
   Loader2,
-  Send,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +53,7 @@ interface NoticiasData {
   };
 }
 
-type TabNoticia = "sismos" | "telegram" | "noticias";
+type TabNoticia = "sismos" | "noticias";
 
 // ─── Helpers ───────────────────────────────────────────────────
 function timeAgo(isoOrEpoch: string): string {
@@ -170,7 +169,7 @@ export function NewsSidebar() {
                 </div>
                 <div>
                   <h2 className="text-sm font-bold">Centro de Monitoreo</h2>
-                  <p className="text-[10px] text-gray-400">Sismos · Telegram · RSS Venezuela</p>
+                  <p className="text-[10px] text-gray-400">Sismos · Noticias · Alertas Venezuela</p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
@@ -210,34 +209,13 @@ export function NewsSidebar() {
                 }`}
               >
                 <Activity className="size-3.5" />
-                <span className="hidden xs:inline">Sismos</span>
+                Sismos
                 {data?.sismos.length ? (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
                     {data.sismos.length}
                   </span>
                 ) : null}
               </button>
-              {data?.fuentes.telegram && (
-                <button
-                  onClick={() => setActiveTab("telegram")}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold border-b-2 transition-all ${
-                    activeTab === "telegram"
-                      ? "border-[#0088cc] text-[#0088cc]"
-                      : "border-transparent text-gray-400 hover:text-gray-600"
-                  }`}
-                >
-                  <Send className="size-3.5" />
-                  <span className="hidden xs:inline">Telegram</span>
-                  {(() => {
-                    const tgCount = data.noticias.filter((n) => n.id.startsWith("tg-")).length;
-                    return tgCount > 0 ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0088cc]/10 text-[#0088cc]">
-                        {tgCount}
-                      </span>
-                    ) : null;
-                  })()}
-                </button>
-              )}
               <button
                 onClick={() => setActiveTab("noticias")}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold border-b-2 transition-all ${
@@ -247,7 +225,7 @@ export function NewsSidebar() {
                 }`}
               >
                 <Rss className="size-3.5" />
-                <span className="hidden xs:inline">RSS</span>
+                Noticias
               </button>
             </div>
 
@@ -265,15 +243,8 @@ export function NewsSidebar() {
                 </div>
               ) : activeTab === "sismos" ? (
                 <SismosTab sismos={data?.sismos || []} />
-              ) : activeTab === "telegram" ? (
-                <TelegramTab
-                  noticias={(data?.noticias || []).filter((n) => n.id.startsWith("tg-"))}
-                />
               ) : (
-                <NoticiasTab
-                  noticias={(data?.noticias || []).filter((n) => !n.id.startsWith("tg-"))}
-                  fuentes={data?.fuentes}
-                />
+                <NoticiasTab noticias={data?.noticias || []} fuentes={data?.fuentes} />
               )}
             </div>
 
@@ -289,7 +260,7 @@ export function NewsSidebar() {
                 </span>
                 <span>RSS</span>
                 {data?.fuentes.twitter && <span>𝕏</span>}
-                {data?.fuentes.telegram && <span className="text-[#0088cc]">TG</span>}
+                {data?.fuentes.telegram && <span>✈️</span>}
               </div>
             </div>
           </motion.aside>
@@ -413,49 +384,6 @@ function NoticiasTab({
           )}
           <div className="flex items-center justify-between">
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-medium bg-gray-100 text-gray-500 hover:bg-gray-100">
-              {n.fuente}
-            </Badge>
-            <span className="text-[10px] text-gray-400">{timeAgo(n.fecha)}</span>
-          </div>
-        </a>
-      ))}
-    </div>
-  );
-}
-
-// ─── Telegram Sub-tab ─────────────────────────────────────────
-function TelegramTab({ noticias }: { noticias: Noticia[] }) {
-  if (noticias.length === 0) {
-    return (
-      <div className="p-8 text-center text-gray-400">
-        <Send className="size-10 mx-auto mb-3 text-[#0088cc]/30" />
-        <p className="text-sm font-medium">Sin mensajes de Telegram</p>
-        <p className="text-xs mt-1">Envía noticias al bot @NoticiasVzlaSismoBot</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-3 space-y-2">
-      {noticias.map((n) => (
-        <a
-          key={n.id}
-          href={n.enlace}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block p-3 rounded-xl border border-[#0088cc]/15 hover:border-[#0088cc]/40 hover:shadow-sm transition-all group bg-[#0088cc]/[0.02]"
-        >
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h4 className="text-xs font-bold text-gray-800 leading-snug line-clamp-3 group-hover:text-[#0088cc] transition-colors flex-1">
-              {n.titulo}
-            </h4>
-            <ExternalLink className="size-3 shrink-0 text-gray-300 group-hover:text-[#0088cc] transition-colors mt-0.5" />
-          </div>
-          {n.resumen && (
-            <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-2 mb-1.5">{n.resumen}</p>
-          )}
-          <div className="flex items-center justify-between">
-            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-medium bg-[#0088cc]/10 text-[#0088cc] hover:bg-[#0088cc]/10">
               {n.fuente}
             </Badge>
             <span className="text-[10px] text-gray-400">{timeAgo(n.fecha)}</span>
