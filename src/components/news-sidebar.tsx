@@ -28,6 +28,8 @@ interface Sismo {
   tiempo: string;
   url: string;
   tipo: "alerta" | "moderado" | "info";
+  fuente: string;
+  nuevo: boolean;
 }
 
 interface Noticia {
@@ -44,7 +46,7 @@ interface NoticiasData {
   noticias: Noticia[];
   timestamp: string;
   fuentes: {
-    sismos: string;
+    sismos: string[];
     noticias: string[];
     twitter: boolean;
     telegram: boolean;
@@ -88,6 +90,8 @@ export function NewsSidebar() {
   const [data, setData] = useState<NoticiasData | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabNoticia>("sismos");
+  const [knownIds, setKnownIds] = useState<Set<string>>(new Set()); // Track known earthquake IDs
+  const [newSismoAlert, setNewSismoAlert] = useState<Sismo | null>(null); // Popup for brand new quakes
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const { toast } = useToast();
 
@@ -97,18 +101,33 @@ export function NewsSidebar() {
       const res = await fetch("/api/noticias");
       if (!res.ok) throw new Error("Error");
       const json = await res.json();
+
+      // Detect brand-new earthquakes
+      const currentIds = new Set(json.sismos.map((s: Sismo) => s.id));
+      for (const s of json.sismos) {
+        if (s.nuevo && !knownIds.has(s.id) && s.tipo === "alerta") {
+          setNewSismoAlert(s);
+          toast({
+            title: `🔴 SISMO M${s.magnitud.toFixed(1)} — ${s.lugar}`,
+            description: "Detectado hace minutos. Toma precauciones.",
+            variant: "destructive",
+          });
+        }
+      }
+      setKnownIds(currentIds);
+
       setData(json);
     } catch {
       if (!silent) toast({ title: "Sin conexión", description: "No se pudieron cargar las noticias", variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, knownIds]);
 
   useEffect(() => {
     fetchNoticias();
-    // Auto-refresh every 2 min
-    refreshTimer.current = setInterval(() => fetchNoticias(true), 120_000);
+    // Polling cada 30 segundos para detección casi en tiempo real
+    refreshTimer.current = setInterval(() => fetchNoticias(true), 30_000);
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [fetchNoticias]);
 
@@ -286,7 +305,11 @@ function SismosTab({ sismos }: { sismos: Sismo[] }) {
             href={s.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block p-3 rounded-xl border border-gray-100 hover:border-[#e86100]/30 hover:shadow-sm transition-all group"
+            className={`block p-3 rounded-xl border hover:shadow-sm transition-all group ${
+              s.nuevo
+                ? "border-red-300 bg-red-50/50 shadow-red-100 shadow-sm"
+                : "border-gray-100 hover:border-[#e86100]/30"
+            }`}
           >
             <div className="flex items-start justify-between gap-2 mb-1.5">
               <div className="flex items-center gap-2">
@@ -296,8 +319,16 @@ function SismosTab({ sismos }: { sismos: Sismo[] }) {
                 <Badge className={`${label.cls} text-[9px] px-1.5 py-0 font-bold border-0`}>
                   {label.text}
                 </Badge>
+                {s.nuevo && (
+                  <span className="text-[9px] font-extrabold bg-red-600 text-white px-1.5 py-0.5 rounded animate-pulse">
+                    NUEVO
+                  </span>
+                )}
               </div>
-              <span className="text-[10px] text-gray-400 whitespace-nowrap">{timeAgo(s.tiempo)}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-gray-400">{s.fuente}</span>
+                <span className="text-[10px] text-gray-400 whitespace-nowrap">{timeAgo(s.tiempo)}</span>
+              </div>
             </div>
             <p className="text-xs text-gray-600 leading-relaxed flex items-start gap-1.5">
               <MapPinIcon className="size-3 shrink-0 mt-0.5 text-gray-400" />
