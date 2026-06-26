@@ -51,6 +51,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { NewsSidebar } from "@/components/news-sidebar";
+import { PwaInstallBanner } from "@/components/pwa-install-banner";
 
 // ─── Types ───────────────────────────────────────────────────────
 interface Reporte {
@@ -808,6 +809,9 @@ export default function EmergenciaPage() {
 
       {/* ─── News Sidebar (independiente del flujo principal) ─── */}
       <NewsSidebar />
+
+      {/* ─── PWA Install Banner ─── */}
+      <PwaInstallBanner />
     </div>
   );
 }
