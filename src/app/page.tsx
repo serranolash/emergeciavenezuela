@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { NewsSidebar } from "@/components/news-sidebar";
 
 // ─── Types ───────────────────────────────────────────────────────
 interface Reporte {
@@ -800,6 +801,9 @@ export default function EmergenciaPage() {
           <p className="text-center text-gray-600 text-[11px]">© {new Date().getFullYear()} Alserla Holdings LLC. Todos los derechos reservados.</p>
         </div>
       </footer>
+
+      {/* ─── News Sidebar (independiente del flujo principal) ─── */}
+      <NewsSidebar />
     </div>
   );
 }
