@@ -18,6 +18,7 @@ model ReporteEmergencia {
   notaAdicional     String?                                      @map("nota_adicional")
   urgenciaAi        Int?                                         @map("urgencia_ai")
   prioridadDesc     String?                                      @map("prioridad_desc")
+  foto              String?                                      @map("foto")
   fechaRegistro     DateTime @default(now())                    @map("fecha_registro")
 
   @@map("reportes_emergencia")

@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
       estado,
       contacto,
       nota_adicional,
+      foto,
     } = body;
 
     if (!id || !ubicacion_exacta || !estado || !contacto) {
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
         estado,
         contacto,
         notaAdicional: nota_adicional || null,
+        foto: foto || null,
       },
     });
 

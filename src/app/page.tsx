@@ -27,6 +27,8 @@ import {
   TrendingUp,
   RefreshCw,
   CheckCircle2,
+  Camera,
+  ImagePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +68,7 @@ interface Reporte {
   urgenciaAi: number | null;
   prioridadDesc: string | null;
   fechaRegistro: string;
+  foto: string | null;
 }
 
 interface Metrics {
@@ -142,6 +145,62 @@ export default function EmergenciaPage() {
     nota_adicional: "",
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Comprimir imagen antes de enviar
+  function compressImage(file: File, maxSize = 800, quality = 0.7): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let w = img.width, h = img.height;
+          if (w > h) { if (w > maxSize) { h = (h * maxSize) / w; w = maxSize; } }
+          else { if (h > maxSize) { w = (w * maxSize) / h; h = maxSize; } }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Formato no válido", description: "Solo se permiten imágenes (JPG, PNG)", variant: "destructive" });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "Imagen muy grande", description: "Máximo 10 MB", variant: "destructive" });
+      return;
+    }
+    // Preview inmediato
+    const reader = new FileReader();
+    reader.onload = (ev) => setFotoPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    // Comprimir en segundo plano
+    compressImage(file).then((compressed) => setFotoBase64(compressed));
+  }
+
+  function removeFoto() {
+    setFotoPreview(null);
+    setFotoBase64(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function clearFotoState() {
+    setFotoPreview(null);
+    setFotoBase64(null);
+  }
 
   // Update status state
   const [updateOpen, setUpdateOpen] = useState(false);
@@ -241,8 +300,8 @@ export default function EmergenciaPage() {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const payload = dialogMode === "conocido"
-      ? { id, tipo_reporte: "Conocido", nombre_completo: formConocido.nombre_completo.trim(), ubicacion_exacta: formConocido.ubicacion_exacta.trim(), estado: formConocido.estado, contacto: formConocido.contacto.trim(), nota_adicional: formConocido.nota_adicional.trim() || undefined }
-      : { id, tipo_reporte: "Sin Identificar", descripcion_fisica: formDesconocido.descripcion_fisica.trim(), ubicacion_exacta: formDesconocido.ubicacion_exacta.trim(), estado: formDesconocido.estado, contacto: formDesconocido.contacto.trim(), nota_adicional: formDesconocido.nota_adicional.trim() || undefined };
+      ? { id, tipo_reporte: "Conocido", nombre_completo: formConocido.nombre_completo.trim(), ubicacion_exacta: formConocido.ubicacion_exacta.trim(), estado: formConocido.estado, contacto: formConocido.contacto.trim(), nota_adicional: formConocido.nota_adicional.trim() || undefined, foto: fotoBase64 || undefined }
+      : { id, tipo_reporte: "Sin Identificar", descripcion_fisica: formDesconocido.descripcion_fisica.trim(), ubicacion_exacta: formDesconocido.ubicacion_exacta.trim(), estado: formDesconocido.estado, contacto: formDesconocido.contacto.trim(), nota_adicional: formDesconocido.nota_adicional.trim() || undefined, foto: fotoBase64 || undefined };
 
     try {
       if (!navigator.onLine) {
@@ -259,6 +318,7 @@ export default function EmergenciaPage() {
       setFormConocido({ nombre_completo: "", ubicacion_exacta: "", estado: "", contacto: "", nota_adicional: "" });
       setFormDesconocido({ descripcion_fisica: "", ubicacion_exacta: "", estado: "", contacto: "", nota_adicional: "" });
       setFormErrors({});
+      clearFotoState();
       setDialogOpen(false);
       fetchReportes();
     } catch (e: unknown) {
@@ -271,6 +331,7 @@ export default function EmergenciaPage() {
   function openDialog(mode: "conocido" | "desconocido") {
     setDialogMode(mode);
     setFormErrors({});
+    clearFotoState();
     setDialogOpen(true);
   }
 
@@ -507,12 +568,18 @@ export default function EmergenciaPage() {
                         <Card className="border border-[#d4d4d4] bg-white hover:shadow-md transition-all hover:border-[#e86100]/30">
                           <CardContent className="p-4 sm:p-5">
                             <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
-                              {/* Avatar */}
+                              {/* Avatar / Foto */}
+                              {r.foto ? (
+                                <div className="shrink-0 size-14 sm:size-16 rounded-xl overflow-hidden border-2 border-[#e86100]/20">
+                                  <img src={r.foto} alt={r.nombreCompleto || "Sin identificar"} className="w-full h-full object-cover" />
+                                </div>
+                              ) : (
                               <div className={`shrink-0 size-11 sm:size-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${
                                 r.estado === "A salvo" ? "bg-emergency-safe" : r.estado === "Herido" ? "bg-emergency-injured" : r.estado === "En tránsito" ? "bg-urgency-2" : "bg-[#e86100]"
                               }`}>
                                 {isUnknown ? <HelpCircle className="size-5" /> : (r.nombreCompleto?.charAt(0).toUpperCase() || "?")}
                               </div>
+                              )}
                               <div className="flex-1 min-w-0">
                                 {/* Title + badges */}
                                 <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -740,6 +807,41 @@ export default function EmergenciaPage() {
                 className="py-4 text-base rounded-xl border-[#d4d4d4] focus:border-[#e86100] min-h-[70px]"
                 rows={2}
               />
+            </div>
+
+            {/* Foto de la persona */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-[#1a1a1a]"><Camera className="size-4 inline mr-1.5 text-[#e86100]" />Foto de la persona (opcional)</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFotoChange}
+                className="hidden"
+              />
+              {fotoPreview ? (
+                <div className="relative group">
+                  <img src={fotoPreview} alt="Preview" className="w-full h-40 object-cover rounded-xl border-2 border-[#e86100]/30" />
+                  <button
+                    type="button"
+                    onClick={removeFoto}
+                    className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full h-28 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:text-[#e86100] hover:border-[#e86100] transition-colors"
+                >
+                  <ImagePlus className="size-6" />
+                  <span className="text-xs font-medium">Toca para tomar o seleccionar una foto</span>
+                </button>
+              )}
+              <p className="text-[10px] text-gray-400">Se comprime automáticamente. Máximo 10 MB.</p>
             </div>
 
             <Button type="submit" disabled={submitting} className="w-full bg-[#e86100] hover:bg-[#d45700] text-white font-bold text-base py-6 rounded-xl shadow-lg shadow-[#e86100]/25 transition-all active:scale-[0.98] disabled:opacity-50">
